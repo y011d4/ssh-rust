@@ -6,7 +6,9 @@ use chacha20::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
 use chacha20::{ChaCha20, Key, Nonce};
 use poly1305::universal_hash::KeyInit;
 use poly1305::Poly1305;
+use std::sync::Arc;
 use tokio::io::AsyncReadExt;
+use tokio::sync::Mutex;
 
 fn kex_pad(bytes: Vec<u8>) -> Vec<u8> {
     let mut padlen = 8 - (1 + bytes.len()) % 8;
@@ -45,7 +47,7 @@ pub fn kex_encrypt(
 }
 
 pub async fn receive_and_kex_decrypt<T>(
-    reader: &mut tokio::io::BufReader<T>,
+    reader: &Arc<Mutex<tokio::io::BufReader<T>>>,
     content_key: Vec<u8>,
     length_key: Vec<u8>,
     sequence_number: u32,
@@ -57,7 +59,7 @@ where
     nonce[8..].copy_from_slice(&sequence_number.to_be_bytes());
     let nonce = Nonce::from_slice(&nonce);
     let mut enc_length = [0; 4];
-    let n = reader.read(&mut enc_length).await?;
+    let n = reader.try_lock()?.read(&mut enc_length).await?;
     if n == 0 {
         return Err(anyhow!("end at length read"));
     }
@@ -74,7 +76,7 @@ where
         return Err(anyhow!("too long"));
     }
     let mut enc_packet = vec![0; length as usize];
-    let n = reader.read(&mut enc_packet).await?;
+    let n = reader.try_lock()?.read(&mut enc_packet).await?;
     if n == 0 {
         return Err(anyhow!("end at packet read"));
     }
@@ -84,7 +86,7 @@ where
     let padlen = packet[0];
     let packet = packet[1..(packet.len() as i32 - padlen as i32) as usize].to_vec();
     let mut auth = [0; 16];
-    let n = reader.read(&mut auth).await?;
+    let n = reader.try_lock()?.read(&mut auth).await?;
     if n == 0 {
         return Err(anyhow!("end at auth read"));
     }
@@ -131,13 +133,12 @@ mod tests {
     async fn test_receive_and_kex_decrypt() -> Result<()> {
         let enc = hex::decode("4540f0529912e7bf57523c7f66022017cfefd3278ac13f40f8523faf")?;
         let mock = Builder::new().read(&enc).build();
-        let mut reader = tokio::io::BufReader::new(mock);
+        let reader = Arc::new(Mutex::new(tokio::io::BufReader::new(mock)));
         let k_main = vec![0; 32];
         let k_header = [vec![0; 31], vec![1]].concat();
         let sequence_number = 0;
         let expected = vec![0x15];
-        let actual =
-            receive_and_kex_decrypt(&mut reader, k_main, k_header, sequence_number).await?;
+        let actual = receive_and_kex_decrypt(&reader, k_main, k_header, sequence_number).await?;
         assert_eq!(actual, expected);
         Ok(())
     }

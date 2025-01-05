@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::ed25519::ed25519_sign;
 use crate::utils::add_length;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Pubkey {
     key_type: String,
     data: Vec<u8>,
@@ -29,7 +29,7 @@ impl Pubkey {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Privkey {
     key_type: String,
     data: Vec<u8>,

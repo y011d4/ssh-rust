@@ -38,3 +38,14 @@ impl SshMsg {
         self as u8
     }
 }
+
+pub const KEX_ALGORITHMS: [&str; 1] = ["curve25519-sha256"];
+pub const SERVER_HOST_KEY_ALGORITHMS: [&str; 1] = ["ssh-ed25519"];
+pub const ENCRYPTION_ALGORITHMS_CLIENT_TO_SERVER: [&str; 1] = ["chacha20-poly1305@openssh.com"];
+pub const ENCRYPTION_ALGORITHMS_SERVER_TO_CLIENT: [&str; 1] = ["chacha20-poly1305@openssh.com"];
+pub const MAC_ALGORITHMS_CLIENT_TO_SERVER: [&str; 1] = [""];
+pub const MAC_ALGORITHMS_SERVER_TO_CLIENT: [&str; 1] = [""];
+pub const COMPRESSION_ALGORITHMS_CLIENT_TO_SERVER: [&str; 1] = ["none"];
+pub const COMPRESSION_ALGORITHMS_SERVER_TO_CLIENT: [&str; 1] = ["none"];
+pub const LANGUAGES_CLIENT_TO_SERVER: [&str; 1] = [""];
+pub const LANGUAGES_SERVER_TO_CLIENT: [&str; 1] = [""];
