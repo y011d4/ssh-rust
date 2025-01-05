@@ -1,6 +1,7 @@
 //! RFC 4250 - The Secure Shell (SSH) Protocol Assigned Numbers
 //! RFC 5656 - Elliptic Curve Algorithm Integration in the Secure Shell Transport Layer
 #![allow(dead_code)]
+#[derive(Clone, Debug)]
 #[repr(u8)]
 pub enum SshMsg {
     Disconnect = 1,
@@ -34,8 +35,8 @@ pub enum SshMsg {
 }
 
 impl SshMsg {
-    pub fn as_u8(self) -> u8 {
-        self as u8
+    pub fn as_u8(&self) -> u8 {
+        (*self).clone() as u8
     }
 }
 

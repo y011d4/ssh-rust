@@ -41,7 +41,7 @@ fn cswap(swap: u8, x_2: BigUint, x_3: BigUint) -> (BigUint, BigUint) {
     let mut x_3 = x_3;
     let bits = x_2.bits().max(x_3.bits());
     // let swap = BigUint::from_bytes_be(&vec![if swap == 1 { 255 } else { 0 }; bits as usize]);
-    let swap = BigUint::from_bytes_be(&vec![(256 as i16 - swap as i16) as u8; bits as usize]);
+    let swap = BigUint::from_bytes_be(&vec![(256i16 - swap as i16) as u8; bits as usize]);
     let dummy = swap & (x_2.clone() ^ x_3.clone());
     x_2 ^= dummy.clone();
     x_3 ^= dummy.clone();

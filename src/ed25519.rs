@@ -88,7 +88,7 @@ impl Mul<BigUint> for Point {
         let mut p = self.clone();
         let mut q = Point::zero();
         let mut s = other.clone();
-        while &s > &BigUint::new(vec![0]) {
+        while s > BigUint::new(vec![0]) {
             if &s & BigUint::new(vec![1]) == BigUint::new(vec![1]) {
                 q = q + p.clone();
             }
@@ -117,7 +117,7 @@ impl PartialEq for Point {
 }
 
 fn point_compress(point: Point) -> Vec<u8> {
-    let zinv = point.z.modpow(&(&(*P) - BigUint::new(vec![2])), &(*P));
+    let zinv = point.z.modpow(&(&(*P) - BigUint::new(vec![2])), &P);
     let x = point.x * &zinv % &(*P);
     let y = point.y * &zinv % &(*P);
     let ret: BigUint = y | ((x & BigUint::new(vec![1])) << 255);
@@ -152,7 +152,7 @@ fn point_decompress(a: Vec<u8>) -> Result<Point> {
 fn recover_x(y: BigUint, sign: u8) -> Option<BigUint> {
     let modp_sqrt_m1 = BigUint::from_str("2").unwrap().modpow(
         &((&(*P) - BigUint::from_str("1").unwrap()) / BigUint::from_str("4").unwrap()),
-        &(*P),
+        &P,
     );
     let d = BigUint::from_str(
         "37095705934669439343138083508754565189542113879843219016388785533085940283555",
@@ -163,7 +163,7 @@ fn recover_x(y: BigUint, sign: u8) -> Option<BigUint> {
     }
     let x2: BigUint = (&y * &y - BigUint::from_str("1").unwrap())
         * (&d * &y * &y + BigUint::from_str("1").unwrap())
-            .modpow(&(&(*P) - BigUint::from_str("2").unwrap()), &(*P))
+            .modpow(&(&(*P) - BigUint::from_str("2").unwrap()), &P)
         % &(*P);
     if x2 == BigUint::from_str("0").unwrap() {
         if sign == 0 {
@@ -174,7 +174,7 @@ fn recover_x(y: BigUint, sign: u8) -> Option<BigUint> {
     }
     let mut x = x2.modpow(
         &((&(*P) + BigUint::from_str("3").unwrap()) / BigUint::from_str("8").unwrap()),
-        &(*P),
+        &P,
     );
     if (&x * &x - &x2) % &(*P) != BigUint::from_str("0").unwrap() {
         x = x * &modp_sqrt_m1 % &(*P);

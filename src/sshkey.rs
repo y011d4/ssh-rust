@@ -19,7 +19,7 @@ impl Pubkey {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut ret = vec![0; 32];
         let data = &self.data;
-        ret[..data.len()].copy_from_slice(&data);
+        ret[..data.len()].copy_from_slice(data);
         [
             add_length(self.key_type.clone().into_bytes()),
             add_length(ret),

@@ -35,8 +35,8 @@ fn pad(bytes: Vec<u8>) -> Vec<u8> {
 fn packet_to_algorithms(bytes: &mut Vec<u8>) -> Result<Vec<String>> {
     let algorithm_length = u32::from_be_bytes(bytes[..4].try_into()?);
     let algorithm_string =
-        String::from_utf8(bytes[4..4 as usize + algorithm_length as usize].to_vec())?;
-    *bytes = bytes[4 as usize + algorithm_length as usize..].to_vec();
+        String::from_utf8(bytes[4..4usize + algorithm_length as usize].to_vec())?;
+    *bytes = bytes[4usize + algorithm_length as usize..].to_vec();
     Ok(algorithm_string.split(",").map(|s| s.to_string()).collect())
 }
 
@@ -50,7 +50,7 @@ where
     let client_id_string = "SSH-2.0-ssh_rust_0.1".to_string();
     writer
         .try_lock()?
-        .write((client_id_string.clone() + "\r\n").as_bytes())
+        .write_all((client_id_string.clone() + "\r\n").as_bytes())
         .await?;
     let mut server_id_string_buf = vec![];
     let _ = reader
@@ -104,10 +104,10 @@ where
     ]
     .concat();
     let key_exchange_init = add_length(pad(client_key_exchange.clone()));
-    writer.try_lock()?.write(&key_exchange_init).await?;
+    writer.try_lock()?.write_all(&key_exchange_init).await?;
     let packet_length = reader.try_lock()?.read_u32().await?;
     let mut packet = vec![0; packet_length as usize];
-    reader.try_lock()?.read(&mut packet).await?;
+    reader.try_lock()?.read_exact(&mut packet).await?;
     let padlen;
     (padlen, packet) = (packet[0], packet[1..].to_vec());
     packet = packet[..(packet.len() as i32 - padlen as i32) as usize].to_vec();
@@ -160,7 +160,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         7,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let packet = [
         vec![SshMsg::GlobalRequest.as_u8()],
@@ -174,7 +174,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         8,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let packet = receive_and_kex_decrypt(
         &reader,
@@ -227,7 +227,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         9,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let packet = [
         vec![SshMsg::ChannelRequest.as_u8()],     // Global Request (98)
@@ -305,7 +305,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         10,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let packet = [
         b"\x62".to_vec(),              // Global Request (98)
@@ -320,7 +320,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         11,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let packet = receive_and_kex_decrypt(
         &reader,
@@ -381,7 +381,7 @@ where
     let _ = writer.try_lock()?.write(&key_exchange).await?;
     let packet_length = reader.try_lock()?.read_u32().await?;
     let mut packet = vec![0; packet_length as usize];
-    reader.try_lock()?.read(&mut packet).await?;
+    reader.try_lock()?.read_exact(&mut packet).await?;
     let padlen;
     (padlen, packet) = (packet[0], packet[1..].to_vec());
     packet = packet[..(packet.len() as i32 - padlen as i32) as usize].to_vec();
@@ -401,7 +401,7 @@ where
     let host_signature = _host_signature;
     let packet_length = reader.try_lock()?.read_u32().await?;
     let mut packet = vec![0; packet_length as usize];
-    reader.try_lock()?.read(&mut packet).await?;
+    reader.try_lock()?.read_exact(&mut packet).await?;
     let padlen;
     (padlen, packet) = (packet[0], packet[1..].to_vec());
     packet = packet[..(packet.len() as i32 - padlen as i32) as usize].to_vec();
@@ -511,7 +511,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         3,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let mut packet = receive_and_kex_decrypt(
         &reader,
@@ -553,7 +553,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         4,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let mut packet = receive_and_kex_decrypt(
         &reader,
@@ -590,7 +590,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         5,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let mut packet = receive_and_kex_decrypt(
         &reader,
@@ -635,7 +635,7 @@ where
         encryption_keys.c_to_s_k_header.clone(),
         6,
     );
-    writer.try_lock()?.write(&packet).await?;
+    writer.try_lock()?.write_all(&packet).await?;
 
     let mut packet = receive_and_kex_decrypt(
         &reader,
@@ -693,7 +693,7 @@ where
         let encryption_keys = calc_encryption_keys(key_exchange_result.clone(), h.clone());
 
         let packet = add_length(pad(vec![SshMsg::Newkeys.as_u8()]));
-        self.writer.try_lock()?.write(&packet).await?;
+        self.writer.try_lock()?.write_all(&packet).await?;
 
         service_request(
             Arc::clone(&self.reader),
@@ -756,7 +756,7 @@ where
                     encryption_keys.c_to_s_k_header.clone(),
                     client_seq_num,
                 );
-                writer.try_lock()?.write(&packet).await?;
+                writer.try_lock()?.write_all(&packet).await?;
                 client_seq_num += 1;
             }
         });

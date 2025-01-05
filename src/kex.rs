@@ -15,7 +15,7 @@ fn kex_pad(bytes: Vec<u8>) -> Vec<u8> {
     if padlen < 4 {
         padlen += 8;
     }
-    [vec![padlen as u8], bytes, (0 as u8..padlen as u8).collect()].concat()
+    [vec![padlen as u8], bytes, (0u8..padlen as u8).collect()].concat()
 }
 
 pub fn kex_encrypt(
@@ -30,8 +30,8 @@ pub fn kex_encrypt(
     let packet = kex_pad(payload);
     let length_key = Key::from_slice(&k_header);
     let content_key = Key::from_slice(&k_main);
-    let mut length_cipher = ChaCha20::new(&length_key, &nonce);
-    let mut content_cipher = ChaCha20::new(&content_key, &nonce);
+    let mut length_cipher = ChaCha20::new(length_key, nonce);
+    let mut content_cipher = ChaCha20::new(content_key, nonce);
     let mut mac_key = poly1305::Key::default();
     content_cipher.apply_keystream(&mut mac_key);
     let mut enc_length = (packet.len() as u32).to_be_bytes();
@@ -42,8 +42,7 @@ pub fn kex_encrypt(
     let poly = Poly1305::new(&mac_key);
     let enc = [enc_length.to_vec(), enc_packet.clone()].concat();
     let auth = poly.compute_unpadded(&enc);
-    let ret = [enc, auth.to_vec()].concat();
-    ret
+    [enc, auth.to_vec()].concat()
 }
 
 pub async fn receive_and_kex_decrypt<T>(
@@ -65,11 +64,11 @@ where
     }
     let length_key = Key::from_slice(&length_key);
     let content_key = Key::from_slice(&content_key);
-    let mut length_cipher = ChaCha20::new(&length_key, &nonce);
-    let mut content_cipher = ChaCha20::new(&content_key, &nonce);
+    let mut length_cipher = ChaCha20::new(length_key, nonce);
+    let mut content_cipher = ChaCha20::new(content_key, nonce);
     let mut mac_key = poly1305::Key::default();
     content_cipher.apply_keystream(&mut mac_key);
-    let mut length = enc_length.clone();
+    let mut length = enc_length;
     length_cipher.apply_keystream(&mut length);
     let length = u32::from_be_bytes(length);
     if length >= 65536 {
