@@ -1,4 +1,7 @@
 //! RFC 4250 - The Secure Shell (SSH) Protocol Assigned Numbers
+//! RFC 4251 - The Secure Shell (SSH) Protocol Architecture
+//! RFC 4252 - The Secure Shell (SSH) Authentication Protocol
+//! RFC 4253 - The Secure Shell (SSH) Transport Layer Protocol
 //! RFC 4254 - The Secure Shell (SSH) Connection Protocol
 use anyhow::Result;
 use rand::prelude::*;
@@ -40,7 +43,7 @@ fn packet_to_algorithms(bytes: &mut Vec<u8>) -> Result<Vec<String>> {
     Ok(algorithm_string.split(",").map(|s| s.to_string()).collect())
 }
 
-async fn protocol<T>(
+async fn protocol_version_exchange<T>(
     reader: Arc<Mutex<tokio::io::BufReader<T>>>,
     writer: Arc<Mutex<OwnedWriteHalf>>,
 ) -> Result<(String, String)>
@@ -67,16 +70,16 @@ where
 }
 
 #[derive(Clone)]
-struct KeyExchangeInitResult {
+struct AlgorithmNegotiationResult {
     client_key_exchange: Vec<u8>,
     server_key_exchange: Vec<u8>,
 }
 
-async fn key_exchange_init<T>(
+async fn algorithm_negotiation<T>(
     reader: Arc<Mutex<tokio::io::BufReader<T>>>,
     writer: Arc<Mutex<OwnedWriteHalf>>,
     rng: &mut ThreadRng,
-) -> Result<KeyExchangeInitResult>
+) -> Result<AlgorithmNegotiationResult>
 where
     T: tokio::io::AsyncRead + Unpin,
 {
@@ -131,224 +134,10 @@ where
     let _server_languages_server_to_client = packet_to_algorithms(&mut packet)?;
     assert_eq!(packet[0], 0, "First KEX Packet Follows must be 0");
     assert_eq!(packet[1..], [0, 0, 0, 0], "Reserved must be 0");
-    Ok(KeyExchangeInitResult {
+    Ok(AlgorithmNegotiationResult {
         client_key_exchange,
         server_key_exchange,
     })
-}
-
-async fn channel_request<T>(
-    reader: Arc<Mutex<tokio::io::BufReader<T>>>,
-    writer: Arc<Mutex<OwnedWriteHalf>>,
-    encryption_keys: EncryptionKeys,
-) -> Result<()>
-where
-    T: tokio::io::AsyncRead + Unpin,
-{
-    // Channel Open, Global Request
-    let packet = [
-        vec![SshMsg::ChannelOpen.as_u8()],
-        add_length(b"session".to_vec()), // Channel type
-        b"\x00\x00\x00\x00".to_vec(),    // Sender channel
-        b"\x00\x10\x00\x00".to_vec(),    // Initial window size
-        b"\x00\x00\x40\x00".to_vec(),    // Maximum packet size
-    ]
-    .concat();
-    let packet = kex_encrypt(
-        packet,
-        encryption_keys.c_to_s_k_main.clone(),
-        encryption_keys.c_to_s_k_header.clone(),
-        7,
-    );
-    writer.try_lock()?.write_all(&packet).await?;
-
-    let packet = [
-        vec![SshMsg::GlobalRequest.as_u8()],
-        add_length(b"no-more-sessions@openssh.com".to_vec()), // Global request name
-        b"\x00".to_vec(),                                     // Global request want reply
-    ]
-    .concat();
-    let packet = kex_encrypt(
-        packet,
-        encryption_keys.c_to_s_k_main.clone(),
-        encryption_keys.c_to_s_k_header.clone(),
-        8,
-    );
-    writer.try_lock()?.write_all(&packet).await?;
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        7,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::GlobalRequest.as_u8());
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        8,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::Debug.as_u8());
-    // packet = packet[1..].to_vec();
-    // assert_eq!(packet, vec![]);
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        9,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::Debug.as_u8());
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        10,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::ChannelOpenConfirmation.as_u8());
-
-    let packet = [
-        vec![SshMsg::ChannelRequest.as_u8()],
-        b"\x00\x00\x00\x00".to_vec(), // Recipient channel
-        add_length(b"auth-agent-req@openssh.com".to_vec()), // Channel request name
-        b"\x00".to_vec(),             // Channel request want reply
-    ]
-    .concat();
-    let packet = kex_encrypt(
-        packet,
-        encryption_keys.c_to_s_k_main.clone(),
-        encryption_keys.c_to_s_k_header.clone(),
-        9,
-    );
-    writer.try_lock()?.write_all(&packet).await?;
-
-    let packet = [
-        vec![SshMsg::ChannelRequest.as_u8()],     // Global Request (98)
-        b"\x00\x00\x00\x00".to_vec(),             // Recipient channel
-        add_length(b"pty-req".to_vec()).to_vec(), // Channel request name
-        b"\x01".to_vec(),                         // Channel request want reply
-        add_length(b"xterm-256color".to_vec()),   // $TERM
-        b"\x00\x00\x01\x1c".to_vec(),             // terminal width, characters
-        b"\x00\x00\x00U".to_vec(),                // terminal height, rows
-        b"\x00\x00\t\xfc".to_vec(),               // terminal width, pixels
-        b"\x00\x00\x05\xfa".to_vec(),             // terminal height, pixels
-        add_length(
-            [
-                b"\x81\x00\x00\x96\x00".to_vec(), // TTY_OP_OSPEED: 38400
-                b"\x80\x00\x00\x96\x00".to_vec(), // TTY_OP_ISPEED
-                b"\x01\x00\x00\x00\x03".to_vec(), // VINTR
-                b"\x02\x00\x00\x00\x1c".to_vec(), // VQUIT
-                b"\x03\x00\x00\x00\x7f".to_vec(), // VERASE
-                b"\x04\x00\x00\x00\x15".to_vec(), // VKILL
-                b"\x05\x00\x00\x00\x04".to_vec(), // VEOF
-                b"\x06\x00\x00\x00\xff".to_vec(), // VEOL
-                b"\x07\x00\x00\x00\xff".to_vec(), // VEOL2
-                b"\x08\x00\x00\x00\x11".to_vec(), // VSTART
-                b"\t\x00\x00\x00\x13".to_vec(),   // VSTOP
-                b"\n\x00\x00\x00\x1a".to_vec(),   // VSUSP
-                b"\x0c\x00\x00\x00\x12".to_vec(), // VREPRINT
-                b"\r\x00\x00\x00\x17".to_vec(),   // VWERASE
-                b"\x0e\x00\x00\x00\x16".to_vec(), // VLNEXT
-                b"\x12\x00\x00\x00\x0f".to_vec(), // VDISCARD
-                b"\x1e\x00\x00\x00\x00".to_vec(), // IGNPAR
-                b"\x1f\x00\x00\x00\x00".to_vec(), // PARMRK
-                b" \x00\x00\x00\x00".to_vec(),    // INPCK
-                b"!\x00\x00\x00\x00".to_vec(),    // ISTRIP
-                b"\"\x00\x00\x00\x00".to_vec(),   // INLCR
-                b"#\x00\x00\x00\x00".to_vec(),    // IGNCR
-                b"$\x00\x00\x00\x01".to_vec(),    // ICRNL
-                b"%\x00\x00\x00\x00".to_vec(),    // IUCLC
-                b"&\x00\x00\x00\x00".to_vec(),    // IXON
-                b"'\x00\x00\x00\x00".to_vec(),    // IXANY
-                b"(\x00\x00\x00\x00".to_vec(),    // IXOFF
-                b")\x00\x00\x00\x00".to_vec(),    // IMAXBEL
-                b"*\x00\x00\x00\x01".to_vec(),    // ?
-                b"2\x00\x00\x00\x01".to_vec(),    // ISIG
-                b"3\x00\x00\x00\x01".to_vec(),    // ICANON
-                b"4\x00\x00\x00\x00".to_vec(),    // XCASE
-                b"5\x00\x00\x00\x01".to_vec(),    // ECHO
-                b"6\x00\x00\x00\x01".to_vec(),    // ECHOE
-                b"7\x00\x00\x00\x01".to_vec(),    // ECHOK
-                b"8\x00\x00\x00\x00".to_vec(),    // ECHONL
-                b"9\x00\x00\x00\x00".to_vec(),    // NOFLSH
-                b":\x00\x00\x00\x00".to_vec(),    // TOSTOP
-                b";\x00\x00\x00\x01".to_vec(),    // IEXTEN
-                b"<\x00\x00\x00\x01".to_vec(),    // ECHOCTL
-                b"=\x00\x00\x00\x01".to_vec(),    // ECHOKE
-                b">\x00\x00\x00\x00".to_vec(),    // PENDIN
-                b"F\x00\x00\x00\x01".to_vec(),    // OPOST
-                b"G\x00\x00\x00\x00".to_vec(),    // OLCUC
-                b"H\x00\x00\x00\x01".to_vec(),    // ONLCR
-                b"I\x00\x00\x00\x00".to_vec(),    // OCRNL
-                b"J\x00\x00\x00\x00".to_vec(),    // ONOCR
-                b"K\x00\x00\x00\x00".to_vec(),    // ONLRET
-                b"Z\x00\x00\x00\x01".to_vec(),    // CS7
-                b"[\x00\x00\x00\x01".to_vec(),    // CS8
-                b"\\\x00\x00\x00\x00".to_vec(),   // PARENB
-                b"]\x00\x00\x00\x00".to_vec(),    // PARODD
-                b"\x00".to_vec(),
-            ]
-            .concat(),
-        ),
-    ]
-    .concat();
-    let packet = kex_encrypt(
-        packet,
-        encryption_keys.c_to_s_k_main.clone(),
-        encryption_keys.c_to_s_k_header.clone(),
-        10,
-    );
-    writer.try_lock()?.write_all(&packet).await?;
-
-    let packet = [
-        b"\x62".to_vec(),              // Global Request (98)
-        b"\x00\x00\x00\x00".to_vec(),  // Recipient channel
-        add_length(b"shell".to_vec()), // Channel request name
-        b"\x01".to_vec(),              // Channel request want reply
-    ]
-    .concat();
-    let packet = kex_encrypt(
-        packet,
-        encryption_keys.c_to_s_k_main.clone(),
-        encryption_keys.c_to_s_k_header.clone(),
-        11,
-    );
-    writer.try_lock()?.write_all(&packet).await?;
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        11,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::ChannelSuccess.as_u8());
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        12,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::ChannelWindowAdjust.as_u8());
-
-    let packet = receive_and_kex_decrypt(
-        &reader,
-        encryption_keys.s_to_c_k_main.clone(),
-        encryption_keys.s_to_c_k_header.clone(),
-        13,
-    )
-    .await?;
-    assert_eq!(packet[0], SshMsg::ChannelSuccess.as_u8());
-    Ok(())
 }
 
 #[derive(Clone)]
@@ -357,8 +146,8 @@ struct KeyExchangeResult {
     host_key_pub: Vec<u8>,
     client_pub: Vec<u8>,
     server_pub: Vec<u8>,
-    host_signature: Vec<u8>,
     shared_key: Vec<u8>,
+    h_signature: Vec<u8>,
 }
 
 async fn key_exchange<T>(
@@ -393,12 +182,12 @@ where
     let host_key_pub = remove_length(&mut kex_host_key)?;
     assert_eq!(kex_host_key.len(), 0);
     let server_pub = remove_length(&mut packet)?;
-    let mut host_signature = remove_length(&mut packet)?;
+    let mut h_signature = remove_length(&mut packet)?;
     assert_eq!(packet.len(), 0);
-    let _signature_type = remove_length(&mut host_signature)?;
-    let _host_signature = remove_length(&mut host_signature)?;
-    assert_eq!(host_signature.len(), 0);
-    let host_signature = _host_signature;
+    let _signature_type = remove_length(&mut h_signature)?;
+    let _h_signature = remove_length(&mut h_signature)?;
+    assert_eq!(h_signature.len(), 0);
+    let h_signature = _h_signature;
     let packet_length = reader.try_lock()?.read_u32().await?;
     let mut packet = vec![0; packet_length as usize];
     reader.try_lock()?.read_exact(&mut packet).await?;
@@ -416,33 +205,27 @@ where
         host_key_pub,
         client_pub,
         server_pub,
-        host_signature,
         shared_key,
+        h_signature,
     })
 }
 
 fn calc_exchange_hash(
     client_id_string: String,
     server_id_string: String,
-    key_exchange_init_result: KeyExchangeInitResult,
+    algorithm_negotiation_result: AlgorithmNegotiationResult,
     key_exchange_result: KeyExchangeResult,
 ) -> Vec<u8> {
     let mut hasher = sha2::Sha256::new();
     hasher.update(add_length(client_id_string.into()));
     hasher.update(add_length(server_id_string.into()));
-    hasher.update(add_length(key_exchange_init_result.client_key_exchange));
-    hasher.update(add_length(key_exchange_init_result.server_key_exchange));
+    hasher.update(add_length(algorithm_negotiation_result.client_key_exchange));
+    hasher.update(add_length(algorithm_negotiation_result.server_key_exchange));
     hasher.update(add_length(key_exchange_result.k_s));
     hasher.update(add_length(key_exchange_result.client_pub));
     hasher.update(add_length(key_exchange_result.server_pub));
     hasher.update(add_length(key_exchange_result.shared_key.clone()));
     let h = hasher.finalize().to_vec();
-    let valid = ed25519_verify(
-        h.clone(),
-        key_exchange_result.host_signature,
-        key_exchange_result.host_key_pub,
-    );
-    assert!(valid);
     h
 }
 
@@ -599,7 +382,7 @@ where
         5,
     )
     .await?;
-    assert_eq!(packet[0], 60); // Public Key algorithm accepted
+    assert_eq!(packet[0], SshMsg::UserauthPkOk.as_u8());
     packet = packet[1..].to_vec();
     let public_key_algorithm_name = remove_length(&mut packet)?;
     let public_key_algorithm_name = String::from_utf8(public_key_algorithm_name)?;
@@ -650,6 +433,218 @@ where
     Ok(())
 }
 
+async fn channel_request<T>(
+    reader: Arc<Mutex<tokio::io::BufReader<T>>>,
+    writer: Arc<Mutex<OwnedWriteHalf>>,
+    encryption_keys: EncryptionKeys,
+) -> Result<()>
+where
+    T: tokio::io::AsyncRead + Unpin,
+{
+    // Channel Open, Global Request
+    let packet = [
+        vec![SshMsg::ChannelOpen.as_u8()],
+        add_length(b"session".to_vec()), // Channel type
+        b"\x00\x00\x00\x00".to_vec(),    // Sender channel
+        b"\x00\x10\x00\x00".to_vec(),    // Initial window size
+        b"\x00\x00\x40\x00".to_vec(),    // Maximum packet size
+    ]
+    .concat();
+    let packet = kex_encrypt(
+        packet,
+        encryption_keys.c_to_s_k_main.clone(),
+        encryption_keys.c_to_s_k_header.clone(),
+        7,
+    );
+    writer.try_lock()?.write_all(&packet).await?;
+
+    let packet = [
+        vec![SshMsg::GlobalRequest.as_u8()],
+        add_length(b"no-more-sessions@openssh.com".to_vec()), // Global request name
+        b"\x00".to_vec(),                                     // Global request want reply
+    ]
+    .concat();
+    let packet = kex_encrypt(
+        packet,
+        encryption_keys.c_to_s_k_main.clone(),
+        encryption_keys.c_to_s_k_header.clone(),
+        8,
+    );
+    writer.try_lock()?.write_all(&packet).await?;
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        7,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::GlobalRequest.as_u8());
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        8,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::Debug.as_u8());
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        9,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::Debug.as_u8());
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        10,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::ChannelOpenConfirmation.as_u8());
+
+    let packet = [
+        vec![SshMsg::ChannelRequest.as_u8()],
+        b"\x00\x00\x00\x00".to_vec(), // Recipient channel
+        add_length(b"auth-agent-req@openssh.com".to_vec()), // Channel request name
+        b"\x00".to_vec(),             // Channel request want reply
+    ]
+    .concat();
+    let packet = kex_encrypt(
+        packet,
+        encryption_keys.c_to_s_k_main.clone(),
+        encryption_keys.c_to_s_k_header.clone(),
+        9,
+    );
+    writer.try_lock()?.write_all(&packet).await?;
+
+    let packet = [
+        vec![SshMsg::ChannelRequest.as_u8()],     // Global Request (98)
+        b"\x00\x00\x00\x00".to_vec(),             // Recipient channel
+        add_length(b"pty-req".to_vec()).to_vec(), // Channel request name
+        b"\x01".to_vec(),                         // Channel request want reply
+        add_length(b"xterm-256color".to_vec()),   // $TERM
+        b"\x00\x00\x01\x1c".to_vec(),             // terminal width, characters
+        b"\x00\x00\x00U".to_vec(),                // terminal height, rows
+        b"\x00\x00\t\xfc".to_vec(),               // terminal width, pixels
+        b"\x00\x00\x05\xfa".to_vec(),             // terminal height, pixels
+        add_length(
+            [
+                b"\x81\x00\x00\x96\x00".to_vec(), // TTY_OP_OSPEED: 38400
+                b"\x80\x00\x00\x96\x00".to_vec(), // TTY_OP_ISPEED
+                b"\x01\x00\x00\x00\x03".to_vec(), // VINTR
+                b"\x02\x00\x00\x00\x1c".to_vec(), // VQUIT
+                b"\x03\x00\x00\x00\x7f".to_vec(), // VERASE
+                b"\x04\x00\x00\x00\x15".to_vec(), // VKILL
+                b"\x05\x00\x00\x00\x04".to_vec(), // VEOF
+                b"\x06\x00\x00\x00\xff".to_vec(), // VEOL
+                b"\x07\x00\x00\x00\xff".to_vec(), // VEOL2
+                b"\x08\x00\x00\x00\x11".to_vec(), // VSTART
+                b"\t\x00\x00\x00\x13".to_vec(),   // VSTOP
+                b"\n\x00\x00\x00\x1a".to_vec(),   // VSUSP
+                b"\x0c\x00\x00\x00\x12".to_vec(), // VREPRINT
+                b"\r\x00\x00\x00\x17".to_vec(),   // VWERASE
+                b"\x0e\x00\x00\x00\x16".to_vec(), // VLNEXT
+                b"\x12\x00\x00\x00\x0f".to_vec(), // VDISCARD
+                b"\x1e\x00\x00\x00\x00".to_vec(), // IGNPAR
+                b"\x1f\x00\x00\x00\x00".to_vec(), // PARMRK
+                b" \x00\x00\x00\x00".to_vec(),    // INPCK
+                b"!\x00\x00\x00\x00".to_vec(),    // ISTRIP
+                b"\"\x00\x00\x00\x00".to_vec(),   // INLCR
+                b"#\x00\x00\x00\x00".to_vec(),    // IGNCR
+                b"$\x00\x00\x00\x01".to_vec(),    // ICRNL
+                b"%\x00\x00\x00\x00".to_vec(),    // IUCLC
+                b"&\x00\x00\x00\x00".to_vec(),    // IXON
+                b"'\x00\x00\x00\x00".to_vec(),    // IXANY
+                b"(\x00\x00\x00\x00".to_vec(),    // IXOFF
+                b")\x00\x00\x00\x00".to_vec(),    // IMAXBEL
+                b"*\x00\x00\x00\x01".to_vec(),    // ?
+                b"2\x00\x00\x00\x01".to_vec(),    // ISIG
+                b"3\x00\x00\x00\x01".to_vec(),    // ICANON
+                b"4\x00\x00\x00\x00".to_vec(),    // XCASE
+                b"5\x00\x00\x00\x01".to_vec(),    // ECHO
+                b"6\x00\x00\x00\x01".to_vec(),    // ECHOE
+                b"7\x00\x00\x00\x01".to_vec(),    // ECHOK
+                b"8\x00\x00\x00\x00".to_vec(),    // ECHONL
+                b"9\x00\x00\x00\x00".to_vec(),    // NOFLSH
+                b":\x00\x00\x00\x00".to_vec(),    // TOSTOP
+                b";\x00\x00\x00\x01".to_vec(),    // IEXTEN
+                b"<\x00\x00\x00\x01".to_vec(),    // ECHOCTL
+                b"=\x00\x00\x00\x01".to_vec(),    // ECHOKE
+                b">\x00\x00\x00\x00".to_vec(),    // PENDIN
+                b"F\x00\x00\x00\x01".to_vec(),    // OPOST
+                b"G\x00\x00\x00\x00".to_vec(),    // OLCUC
+                b"H\x00\x00\x00\x01".to_vec(),    // ONLCR
+                b"I\x00\x00\x00\x00".to_vec(),    // OCRNL
+                b"J\x00\x00\x00\x00".to_vec(),    // ONOCR
+                b"K\x00\x00\x00\x00".to_vec(),    // ONLRET
+                b"Z\x00\x00\x00\x01".to_vec(),    // CS7
+                b"[\x00\x00\x00\x01".to_vec(),    // CS8
+                b"\\\x00\x00\x00\x00".to_vec(),   // PARENB
+                b"]\x00\x00\x00\x00".to_vec(),    // PARODD
+                b"\x00".to_vec(),
+            ]
+            .concat(),
+        ),
+    ]
+    .concat();
+    let packet = kex_encrypt(
+        packet,
+        encryption_keys.c_to_s_k_main.clone(),
+        encryption_keys.c_to_s_k_header.clone(),
+        10,
+    );
+    writer.try_lock()?.write_all(&packet).await?;
+
+    let packet = [
+        vec![SshMsg::ChannelRequest.as_u8()],
+        b"\x00\x00\x00\x00".to_vec(),  // Recipient channel
+        add_length(b"shell".to_vec()), // Channel request name
+        b"\x01".to_vec(),              // Channel request want reply
+    ]
+    .concat();
+    let packet = kex_encrypt(
+        packet,
+        encryption_keys.c_to_s_k_main.clone(),
+        encryption_keys.c_to_s_k_header.clone(),
+        11,
+    );
+    writer.try_lock()?.write_all(&packet).await?;
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        11,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::ChannelSuccess.as_u8());
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        12,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::ChannelWindowAdjust.as_u8());
+
+    let packet = receive_and_kex_decrypt(
+        &reader,
+        encryption_keys.s_to_c_k_main.clone(),
+        encryption_keys.s_to_c_k_header.clone(),
+        13,
+    )
+    .await?;
+    assert_eq!(packet[0], SshMsg::ChannelSuccess.as_u8());
+    Ok(())
+}
+
 impl<T> SshClient<T>
 where
     T: tokio::io::AsyncRead + Unpin + Send + 'static,
@@ -669,10 +664,10 @@ where
         }
     }
 
-    pub async fn transport(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let (client_id_string, server_id_string) =
-            protocol(Arc::clone(&self.reader), Arc::clone(&self.writer)).await?;
-        let key_exchange_init_result = key_exchange_init(
+            protocol_version_exchange(Arc::clone(&self.reader), Arc::clone(&self.writer)).await?;
+        let algorithm_negotiation_result = algorithm_negotiation(
             Arc::clone(&self.reader),
             Arc::clone(&self.writer),
             &mut self.rng,
@@ -687,9 +682,17 @@ where
         let h = calc_exchange_hash(
             client_id_string.clone(),
             server_id_string.clone(),
-            key_exchange_init_result.clone(),
+            algorithm_negotiation_result.clone(),
             key_exchange_result.clone(),
         );
+
+        let valid = ed25519_verify(
+            key_exchange_result.h_signature.clone(),
+            h.clone(),
+            key_exchange_result.host_key_pub.clone(),
+        );
+        assert!(valid);
+
         let encryption_keys = calc_encryption_keys(key_exchange_result.clone(), h.clone());
 
         let packet = add_length(pad(vec![SshMsg::Newkeys.as_u8()]));

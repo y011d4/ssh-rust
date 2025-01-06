@@ -56,7 +56,7 @@ impl Privkey {
     }
 
     pub fn sign(&self, msg: Vec<u8>) -> Vec<u8> {
-        ed25519_sign(self.data.clone(), msg)
+        ed25519_sign(msg, self.data.clone())
     }
 }
 

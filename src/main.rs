@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     // let mut writer = tokio::io::BufWriter::new(write_half);
     let writer = write_half;
     let mut client = ssh::SshClient::new(reader, writer, args.login_name.clone(), privkey.clone());
-    client.transport().await?;
+    client.run().await?;
 
     Ok(())
 }

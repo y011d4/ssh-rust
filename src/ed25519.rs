@@ -1,4 +1,4 @@
-//! RFC 8032
+//! RFC 8032 - Edwards-Curve Digital Signature Algorithm (EdDSA)
 use anyhow::{anyhow, Result};
 use num_bigint::BigUint;
 use once_cell::sync::Lazy;
@@ -213,7 +213,7 @@ fn sha512_modq(bytes: Vec<u8>) -> BigUint {
     ret % &(*Q)
 }
 
-pub fn ed25519_sign(secret: Vec<u8>, msg: Vec<u8>) -> Vec<u8> {
+pub fn ed25519_sign(msg: Vec<u8>, secret: Vec<u8>) -> Vec<u8> {
     let (a, prefix) = secret_expand(secret);
     let ag = point_compress(BASE.clone() * a.clone());
     let r = sha512_modq([prefix.clone(), msg.clone()].concat());
@@ -228,7 +228,7 @@ pub fn ed25519_sign(secret: Vec<u8>, msg: Vec<u8>) -> Vec<u8> {
     [rs, s_bytes].concat()
 }
 
-pub fn ed25519_verify(msg: Vec<u8>, signature: Vec<u8>, public: Vec<u8>) -> bool {
+pub fn ed25519_verify(signature: Vec<u8>, msg: Vec<u8>, public: Vec<u8>) -> bool {
     if public.len() != 32 {
         println!("a.len() != 32");
         return false;
@@ -269,9 +269,9 @@ mod tests {
             hex::decode("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")?;
         let msg = vec![];
         let expected = hex::decode("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")?;
-        let actual = ed25519_sign(secret, msg.clone());
+        let actual = ed25519_sign(msg.clone(), secret);
         assert_eq!(actual, expected);
-        assert!(ed25519_verify(msg, actual, public));
+        assert!(ed25519_verify(actual, msg, public));
 
         let secret =
             hex::decode("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")?;
@@ -279,9 +279,9 @@ mod tests {
             hex::decode("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c")?;
         let msg = vec![0x72];
         let expected = hex::decode("92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00")?;
-        let actual = ed25519_sign(secret, msg.clone());
+        let actual = ed25519_sign(msg.clone(), secret);
         assert_eq!(actual, expected);
-        assert!(ed25519_verify(msg, actual, public));
+        assert!(ed25519_verify(actual, msg, public));
 
         let secret =
             hex::decode("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7")?;
@@ -289,9 +289,9 @@ mod tests {
             hex::decode("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025")?;
         let msg = vec![0xaf, 0x82];
         let expected = hex::decode("6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a")?;
-        let actual = ed25519_sign(secret, msg.clone());
+        let actual = ed25519_sign(msg.clone(), secret);
         assert_eq!(actual, expected);
-        assert!(ed25519_verify(msg, actual, public));
+        assert!(ed25519_verify(actual, msg, public));
         Ok(())
     }
 }

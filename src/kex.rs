@@ -1,5 +1,5 @@
-//! RFC 4253
-//! RFC 7539
+//! RFC 4253 - The Secure Shell (SSH) Transport Layer Protocol
+//! RFC 8439 - ChaCha20 and Poly1305 for IETF Protocols
 //! https://github.com/rus-cert/ssh-chacha20-poly1305-drafts/blob/master/ssh-chacha20-poly1305%40openssh.md
 use anyhow::{anyhow, Result};
 use chacha20::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
